@@ -1,0 +1,248 @@
+\Needspace{12\baselineskip}
+\section{Experiments}
+
+\problem{experiment\_log}{Experiment logging}{3}
+
+Each run records configuration, losses, LR, steps/tokens, elapsed time, and
+checkpoints in \texttt{train.log} and W\&B. The low-resource TinyStories
+experiments use MPS and about 40.96M tokens; the added TinyStories/OWT main
+runs use CUDA and 327.68M tokens. Logging details, shared settings, and
+additional diagnostics are in Appendices~\ref{app:experiment_details}--\ref{app:diagnostics}.
+
+\problem{learning\_rate}{Tune the learning rate}{3}
+
+\textbf{(a) Low-resource search.}
+I screened three LRs for 1,000 steps, then compared peaks
+$5\times10^{-4}$, $10^{-3}$, and $2\times10^{-3}$ in fresh 10,000-step
+runs (40.96M tokens each). All use the same four-layer TinyStories model,
+batch 16, seed 42, and cosine floor equal to one tenth of the peak.
+The lowest final loss, 1.5966, came from $10^{-3}$ and met the 2.00
+low-resource target. I retained this LR for subsequent baselines.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.49\textwidth]{figures/learning_rate_screening.png}\hfill
+    \includegraphics[width=0.49\textwidth]{figures/learning_rate_full_budget.png}
+    \caption{W\&B validation curves for short screening (left) and
+    40.96M-token comparisons (right), with smoothing disabled.
+    Legends show peak learning rates. The low-resource validation target is 2.00.}
+    \label{fig:lr_sweep}
+\end{figure}
+
+\begin{table}[htbp]
+    \centering
+    \small
+    \begin{tabular}{@{}rrrrr@{}}
+        \toprule
+        Peak LR & Minimum LR & Final val loss & Best sampled val loss & Final PPL \\
+        \midrule
+        $5\times10^{-4}$ & $5\times10^{-5}$ & 1.6402 & 1.6343 & 5.16 \\
+        $1\times10^{-3}$ & $1\times10^{-4}$ & \textbf{1.5966} & \textbf{1.5921} & \textbf{4.94} \\
+        $2\times10^{-3}$ & $2\times10^{-4}$ & 1.6092 & 1.6010 & 5.00 \\
+        \bottomrule
+    \end{tabular}
+    \caption{Equal-budget results after 10,000 steps (40.96M tokens).
+    Final perplexity is $\exp(\text{final validation loss})$.}
+    \label{tab:lr_results}
+\end{table}
+
+\Needspace{6\baselineskip}
+\textbf{(b) Stability.}
+Larger tested LRs first slowed learning, then caused repeated loss
+explosions at 0.3/0.5. Losses stayed finite and sometimes recovered; this
+is instability, not proven unbounded divergence. These short probes used
+the 10,000-step schedule and are compared over their first 1,000 updates.
+The best tested LR was well below the unstable range, so the search does
+not establish a sharp ``edge of stability.''
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.49\textwidth]{figures/learning_rate_divergence_train.png}\hfill
+    \includegraphics[width=0.49\textwidth]{figures/learning_rate_divergence_val.png}
+    \caption{W\&B training (left) and validation (right) curves over the first
+    1,000 steps, with smoothing disabled and logarithmic loss axes.
+    Legends show peak learning rates; the $0.001$ curve is the full baseline
+    restricted to this window. Warmup lasts 100 steps.}
+    \label{fig:lr_divergence}
+\end{figure}
+
+\begin{table}[htbp]
+    \centering
+    \small
+    \begin{tabular}{@{}rrl@{}}
+        \toprule
+        Peak LR & Val loss at step 1,000 & Observed behavior \\
+        \midrule
+        $10^{-3}$ & 2.3642 & Consistent improvement \\
+        $10^{-2}$ & 3.4377 & Slow improvement \\
+        $3\times10^{-2}$ & 4.4470 & High-loss plateau and oscillation \\
+        $10^{-1}$ & 5.2528 & High-loss plateau and oscillation \\
+        $0.3$ & 27.3223 & Repeated loss explosions \\
+        $0.5$ & 6.5385 & Repeated loss explosions and recovery \\
+        \bottomrule
+    \end{tabular}
+    \caption{High-LR probes compared at the same training step and token budget.}
+    \label{tab:lr_stability}
+\end{table}
+
+\FloatBarrier
+\Needspace{7\baselineskip}
+\textbf{(c) Standard-budget TinyStories follow-up.}
+\phantomsection\label{par:standard_ts}
+A fresh baseline retained LR $10^{-3}/10^{-4}$ and trained for 80,000
+updates (327.68M tokens), with 800-step warmup and the same fixed validation
+windows as the matched low-resource baseline. Final loss was 1.3245,
+meeting the standard target of 1.45; the sampled minimum was 1.3240 at
+79,200 updates. Complete settings are in Appendix~\ref{app:standard_protocol}.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.49\textwidth]{figures/tinystories_full_train.png}\hfill
+    \includegraphics[width=0.49\textwidth]{figures/tinystories_full_val.png}
+    \caption{TinyStories training loss (left) and fixed-window validation
+    loss (right) against training tokens. Purple: 327.68M; orange: 40.96M.
+    W\&B exports use linear axes; the short run ends at its actual budget.}
+    \label{fig:tinystories_budget}
+\end{figure}
+
+The matched short run ended at 1.5879, a gap of 0.2634 nats per token.
+Its earlier advantage at equal token counts reverses as the long run
+continues. Both token budget and LR schedule changed, and TinyStories
+moved from MPS to CUDA; this compares complete recipes, not tokens alone.
+The low-resource ablations were not repeated at the larger budget.
+
+\FloatBarrier
+\problem{batch\_size\_experiment}{Batch size variations}{1}
+
+I varied batch size while keeping approximately 40.96M training tokens and
+LR $10^{-3}/10^{-4}$ fixed. Updates, warmup, and evaluation/saving intervals
+scaled inversely with batch size; all runs used the same private validation
+windows (seed 42, 20 batches of 16 sequences).
+
+\begin{table}[htbp]
+    \centering
+    \small
+    \begin{tabular}{@{}rrrrrr@{}}
+        \toprule
+        Batch & Updates & Warmup & Eval interval & Final val loss & Time (min) \\
+        \midrule
+        1  & 160,000 & 1,600 & 1,600 & 1.7321 & 144.34 \\
+        8  & 20,000  & 200   & 200   & \textbf{1.5839} & 89.51 \\
+        16 & 10,000  & 100   & 100   & 1.5879 & 87.03 \\
+        32 & 5,000   & 50    & 50    & 1.6081 & 85.51 \\
+        48 & 3,333   & 33    & 33    & 1.6329 & 84.62 \\
+        \bottomrule
+    \end{tabular}
+    \caption{Approximately equal-token, fixed-LR batch-size comparison on MPS.
+    Warmup and evaluation intervals are in updates. Times use the last logged
+    training elapsed time and include intervening evaluation/checkpoint work,
+    but exclude startup and final evaluation/checkpoint overhead.}
+    \label{tab:batch_size_results}
+\end{table}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.49\textwidth]{figures/batchsize_train.png}\hfill
+    \includegraphics[width=0.49\textwidth]{figures/batchsize_val.png}
+    \caption{W\&B training loss (left) and validation loss (right) against
+    tokens processed, with smoothing disabled. Legend numbers denote batch
+    sizes; colors match across panels: magenta 1, gray 8, orange 16, red 32,
+    and brown 48. Training points are individual minibatch losses.}
+    \label{fig:batch_size}
+\end{figure}
+
+Batches 8--16 gave the best observed loss/runtime balance. Batch 8's 1.5839
+was only 0.0040 below batch 16, insufficient for a reliable ranking from
+one seed. Batch 1 fluctuated more and learned less efficiently; batches
+32/48 were slightly faster but had worse final losses. Increasing 16 to
+48 saved only about 2.8\% elapsed time.
+
+These are fixed-LR recipes, not per-batch optima. Batch 1's system-wide
+swap growth confounds timing. Capacity probes passed at 48 but stopped at
+56/64 for memory pressure, so 48 is the largest tested passing batch,
+not a proven limit. Diagnostics and run-selection details are in
+Appendix~\ref{app:diagnostics}.
+
+\problem{generate}{Generate text}{1}
+\label{prob:generate}
+
+\textbf{Low-resource samples.}
+The matched TinyStories baseline (loss 1.5879) used the Lily prompt,
+seed 42, top-$p=0.9$, and temperatures 0.7/1.0/1.3, with a maximum of
+256 new tokens. All stopped at EOS. Full outputs are in
+Appendix~\ref{app:low_resource_samples}.
+
+\begin{table}[htbp]
+    \centering
+    \small
+    \begin{tabular}{@{}rrrrl@{}}
+        \toprule
+        Temperature & Prompt tokens & Sampled tokens & Text tokens & Stop reason \\
+        \midrule
+        0.7 & 13 & 142 & 141 & EOS \\
+        1.0 & 13 & 207 & 206 & EOS \\
+        1.3 & 13 & 157 & 156 & EOS \\
+        \bottomrule
+    \end{tabular}
+    \caption{Counts reported by the generation CLI. Sampled tokens include
+    the terminal EOS; text tokens exclude it. Both counts exclude the prompt.
+    All three samples stopped at EOS before the 256-new-token limit.}
+    \label{tab:generation_counts}
+\end{table}
+
+Lower temperatures produced readable story structure but inconsistent
+logic: the mother returns the ball twice at 0.7, while 1.0 shifts from a
+rose to an apple and a flower. At 1.3, phrases such as ``grandma mommy''
+and ``cupboardving'' weaken fluency.
+
+\Needspace{7\baselineskip}
+\textbf{Standard-budget samples.}
+Both final models use the same three prompts:
+\begin{enumerate}[label=\textbf{P\arabic*:},leftmargin=*,nosep]
+\item \texttt{Once upon a time, there was a little girl named Lily.}
+\item \texttt{In a recent study, researchers found that}
+\item \texttt{The history of the Internet began with}
+\end{enumerate}
+Each prompt is sampled at 0.7/1.0/1.3 with seed 42 reset, top-$p=0.9$,
+CUDA, and a 256-new-token/EOS limit. Appendix~\ref{app:standard_samples}
+contains all 18 outputs and token counts. The excerpts below use 0.7.
+
+\Needspace{6\baselineskip}
+\textbf{P1: story.}
+\begin{quote}\small
+\textbf{TinyStories:} She had a big box of crayons. [\ldots]
+"What a nice picture!" she said.
+
+\textbf{OWT:} When she got the chance to pick up the rope, she became aware
+of what was going on, and was seen in a scene in a police car.
+\end{quote}
+TinyStories sustains a story but confuses drawing with cake-making. OWT
+switches to repetitive incident reporting. P1 favors TinyStories' domain.
+
+\Needspace{6\baselineskip}
+\textbf{P2: research.}
+\begin{quote}\small
+\textbf{TinyStories:} The people in the village were worried about their customers.
+
+\textbf{OWT:} The researchers are also examining the effects of lead-freezing
+in brain cells, which may cause lead-freezing.
+\end{quote}
+TinyStories returns to stories; OWT imitates scientific style but produces
+circular, unsupported explanations. Style matching is not factual coherence.
+
+\Needspace{6\baselineskip}
+\textbf{P3: Internet history.}
+\begin{quote}\small
+\textbf{TinyStories:} The history of the Internet began with a smile.
+
+\textbf{OWT:} The history of the Internet began with the introduction of the
+new Internet-based Internet.
+\end{quote}
+TinyStories again returns to its story distribution. OWT stays on technology
+but repeats phrases rather than producing a coherent history.
+
+Both longer runs improved held-out loss without eliminating contradictions.
+Temperature 1.3 increased malformed words and topic drift; lower temperatures
+could favor repetition. These one-seed samples do not establish an optimal
+temperature or a general quality ranking. Low-resource OWT used only P1,
+so P2/P3 do not test generation changes across matched budgets.
